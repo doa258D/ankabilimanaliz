@@ -6,14 +6,29 @@ import altair as alt
 # --- 1. SAYFA AYARLARI ---
 st.set_page_config(layout="wide", page_title="Okul Sınav Takip Sistemi")
 
-# --- 2. CSS STİLLERİ ---
+# --- 2. CSS STİLLERİ (Yazdırma Ayarları) ---
 st.markdown("""
 <style>
 @media print {
-    .stSidebar {display: none;}
-    .stButton {display: none;}
-    .stAlert {display: none;}
-    .block-container {padding-top: 0;}
+    .stSidebar {display: none !important;} /* Yan menüyü gizle */
+    .stButton {display: none !important;} /* Butonları gizle */
+    .stTabs [role="tablist"] {display: none !important;} /* Sekme başlıklarını gizle */
+    .stSelectbox {display: none !important;} /* Seçim kutularını gizle */
+    .stAlert {display: none !important;} /* Uyarı kutularını gizle */
+    
+    /* İçeriği kağıda tam yay */
+    .block-container {
+        padding-top: 0 !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        max-width: 100% !important;
+    }
+    
+    /* Sayfa kesmelerini yönet */
+    .page-break { 
+        page-break-after: always;
+        display: block;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -82,27 +97,16 @@ def clean_orbim_file(uploaded_file, kademe):
         
         df.columns = yeni_basliklar
         
-        # Öğrenci olmayan satırları temizle
-        # Öğr.No sayısal olmalı veya boş olabilir (bazı hatalı satırlarda)
         df['Öğr.No'] = pd.to_numeric(df['Öğr.No'], errors='coerce').fillna(0).astype(int)
-        
-        # Gerçek veri satırlarını filtrele (İsim veya No boşsa at)
         df = df.dropna(subset=['Ad, Soyad'])
         
-        # --- AKILLI KİMLİK OLUŞTURMA (Magic ID) ---
-        # 1. Adı standartlaştır (Büyük harf, boşlukları sil)
         df['Ad_Standart'] = df['Ad, Soyad'].astype(str).str.strip().str.upper()
-        
-        # 2. Birleştirme Anahtarı (Merge_Key) Oluştur
-        # Kural: Eğer No > 0 ise No kullan, değilse İsim kullan.
         df['Merge_Key'] = df.apply(
             lambda row: str(row['Öğr.No']) if row['Öğr.No'] > 0 else row['Ad_Standart'], 
             axis=1
         )
         
-        # Çift kayıtları bu yeni anahtara göre sil
         df.drop_duplicates(subset=['Merge_Key'], keep='first', inplace=True)
-        
         return df
     except Exception as e:
         st.error(f"Dosya temizlenirken hata: {e}")
@@ -111,7 +115,7 @@ def clean_orbim_file(uploaded_file, kademe):
 # --- 5. FORMATLAMA FONKSİYONU ---
 def format_data(df, sinav_adi):
     try:
-        id_vars = ['Merge_Key', 'Öğr.No', 'Ad, Soyad', 'Sınıf'] # Merge_Key eklendi
+        id_vars = ['Merge_Key', 'Öğr.No', 'Ad, Soyad', 'Sınıf']
         df.columns = df.columns.str.strip()
         
         value_vars = [col for col in df.columns if 'DOĞRU' in col or 'YANLIŞ' in col or 'NET' in col]
@@ -127,7 +131,7 @@ def format_data(df, sinav_adi):
         long_df.dropna(subset=['Ders', 'Tip', 'Deger'], inplace=True)
 
         final_df = long_df.pivot_table(
-            index=['Merge_Key', 'Öğr.No', 'Ad, Soyad', 'Sınıf', 'Ders'], # Merge_Key indexte
+            index=['Merge_Key', 'Öğr.No', 'Ad, Soyad', 'Sınıf', 'Ders'], 
             columns='Tip', 
             values='Deger'
         ).reset_index()
@@ -148,7 +152,19 @@ def format_data(df, sinav_adi):
 # --- 6. ANALİZ EKRANI ---
 def main_analysis(all_data, sinav_siralamasi_listesi):
     st.success(f"✅ Analiz Aktif! Toplam {len(all_data['SinavAdi'].unique())} sınav yüklü.")
-    st.info("💡 **İPUCU:** PDF için **CTRL + P** tuşlarını kullanınız.")
+
+    # --- YAZDIRMA MODU KUTUCUĞU (SOL MENÜDE) ---
+    yazdirma_modu = st.sidebar.checkbox("🖨️ YAZDIRMA MODUNU AÇ (PDF)")
+    
+    if yazdirma_modu:
+        st.warning("⚠️ **Yazdırma Modu Aktif!** Sayfa sadeleştirildi. Klavyeden **CTRL + P** tuşlarına basarak PDF olarak kaydedebilirsiniz.")
+        # CSS ile gereksizleri gizle
+        st.markdown("""
+        <style>
+            .stTabs [role="tablist"], .stSelectbox, .stMarkdown h1, .stMarkdown h2 {display: none;}
+            div[data-testid="stSidebar"] {display: none;}
+        </style>
+        """, unsafe_allow_html=True)
 
     # --- DERS SEÇİMİ VE SIRALAMA ---
     ham_dersler = all_data['Ders'].unique().tolist()
@@ -162,109 +178,105 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
         st.error("Verilerde hiçbir ders bulunamadı.")
         return
 
-    # Varsayılan TOPLAM
     default_index = 0
     if "TOPLAM" in dersler_sirali:
         default_index = dersler_sirali.index("TOPLAM")
-        
-    secilen_ders = st.selectbox("Analiz İçin Ders Seçin", dersler_sirali, index=default_index)
-    
-    df_filt = all_data[all_data['Ders'] == secilen_ders].copy()
-        
-    if df_filt.empty:
-        st.warning("Seçilen ders için veri yok.")
-        return
 
     # --- SEKMELER ---
+    # Eğer yazdırma modu açıksa sekmeler görünmez ama içerik görünür
     tab_genel, tab_toplu = st.tabs(["📊 GENEL ANALİZ", "📑 TÜM ÖĞRENCİ KARNELERİ"])
 
     # --- SEKME 1: GENEL ANALİZ ---
     with tab_genel:
-        st.subheader(f"📈 Sınıf Bazlı Gelişim ({secilen_ders})")
-        try:
-            sinif_trend = df_filt.groupby(['Sube', 'SinavAdi'])['DogruSayisi'].mean().reset_index()
-            if not sinif_trend.empty:
-                chart = alt.Chart(sinif_trend).mark_bar().encode(
-                    x=alt.X('Sube', title='Şubeler', sort=None),
-                    y=alt.Y('DogruSayisi', title='Ort. Doğru'),
-                    color=alt.Color('SinavAdi', title='Sınav'),
-                    xOffset='SinavAdi',
-                    tooltip=['Sube', 'SinavAdi', 'DogruSayisi']
-                ).interactive()
-                st.altair_chart(chart, use_container_width=True)
-            else:
-                st.info("Grafik için veri yetersiz.")
-        except:
-            st.warning("Grafik çizilemedi.")
-
-        st.markdown("---")
-
-        # ÖĞRENCİ GELİŞİM LİSTESİ (MERGE KEY İLE)
-        if len(sinav_siralamasi_listesi) >= 2:
-            st.subheader(f"🏆 {secilen_ders} Dersinde Gelişim Raporu")
-            ilk = sinav_siralamasi_listesi[0]
-            son = sinav_siralamasi_listesi[-1]
-            st.info(f"Karşılaştırma: **{ilk}** ile **{son}** arası.")
-            
-            df_ilk = df_filt[df_filt['SinavAdi'] == ilk]
-            df_son = df_filt[df_filt['SinavAdi'] == son]
-            
-            if not df_ilk.empty and not df_son.empty:
-                # Merge_Key üzerinden birleştir (İsim veya No hangisi sağlamsa)
-                merged = pd.merge(
-                    df_ilk[['Merge_Key', 'Sınıf', 'DogruSayisi']], 
-                    df_son[['Merge_Key', 'Ad, Soyad', 'DogruSayisi']], # Güncel isim son sınavdan
-                    on='Merge_Key', 
-                    suffixes=('_ilk', '_son')
-                )
-                merged['Fark'] = merged['DogruSayisi_son'] - merged['DogruSayisi_ilk']
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.success(f"Yükselenler ({ilk} -> {son})")
-                    st.dataframe(merged[merged['Fark'] > 0].sort_values('Fark', ascending=False).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']])
-                with c2:
-                    st.error(f"Düşenler ({ilk} -> {son})")
-                    st.dataframe(merged[merged['Fark'] < 0].sort_values('Fark', ascending=True).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']])
-
-        # BİREYSEL KARNE (TEKLİ)
-        st.markdown("---")
-        st.subheader("👤 Bireysel Öğrenci Karnesi (Tekli)")
+        secilen_ders = st.selectbox("Analiz İçin Ders Seçin", dersler_sirali, index=default_index)
         
-        unique_students = all_data[['Merge_Key', 'Ad, Soyad', 'Öğr.No']].drop_duplicates(subset=['Merge_Key'], keep='last')
-        # Etikete No 0 ise sadece isim yaz, değilse No ekle
-        unique_students['Etiket'] = unique_students.apply(lambda x: f"{x['Ad, Soyad']} (No: {int(x['Öğr.No'])})" if x['Öğr.No'] > 0 else f"{x['Ad, Soyad']} (No Yok)", axis=1)
+        df_filt = all_data[all_data['Ders'] == secilen_ders].copy()
         
-        ogrenci_etiketleri = sorted(unique_students['Etiket'].tolist())
-        secilen_etiket = st.selectbox("Öğrenci Seçin", ogrenci_etiketleri)
-        
-        if secilen_etiket:
-            secilen_key = unique_students[unique_students['Etiket'] == secilen_etiket]['Merge_Key'].iloc[0]
-            ogr_data = all_data[all_data['Merge_Key'] == secilen_key].copy()
-            
-            if not ogr_data.empty:
-                try:
-                    pvt = ogr_data.pivot_table(index='Ders', columns='SinavAdi', values='DogruSayisi')
-                    # Sıralamayı uygula
-                    mevcut_ve_sirali = [d for d in dersler_sirali if d in pvt.index]
-                    pvt = pvt.reindex(mevcut_ve_sirali)
-                    st.write(f"**{secilen_etiket}** Doğru Sayıları:")
-                    st.dataframe(pvt)
-                except:
-                    st.error("Tablo hatası.")
-
-                st.write("Öğrencinin Ders Bazlı Gelişim Grafiği:")
-                try:
-                    c_ogr = alt.Chart(ogr_data).mark_bar().encode(
-                        x=alt.X('Ders', title='Dersler', sort=dersler_sirali),
-                        y=alt.Y('DogruSayisi', title='Doğru Sayısı'),
+        if df_filt.empty:
+            st.warning("Seçilen ders için veri yok.")
+        else:
+            st.subheader(f"📈 Sınıf Bazlı Gelişim ({secilen_ders})")
+            try:
+                sinif_trend = df_filt.groupby(['Sube', 'SinavAdi'])['DogruSayisi'].mean().reset_index()
+                if not sinif_trend.empty:
+                    chart = alt.Chart(sinif_trend).mark_bar().encode(
+                        x=alt.X('Sube', title='Şubeler', sort=None),
+                        y=alt.Y('DogruSayisi', title='Ort. Doğru'),
                         color=alt.Color('SinavAdi', title='Sınav'),
                         xOffset='SinavAdi',
-                        tooltip=['Ders', 'SinavAdi', 'DogruSayisi']
+                        tooltip=['Sube', 'SinavAdi', 'DogruSayisi']
                     ).interactive()
-                    st.altair_chart(c_ogr, use_container_width=True)
-                except: 
-                    st.write("Grafik verisi yok.")
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("Grafik için veri yetersiz.")
+            except:
+                st.warning("Grafik çizilemedi.")
+
+            st.markdown("---")
+
+            # ÖĞRENCİ GELİŞİM LİSTESİ
+            if len(sinav_siralamasi_listesi) >= 2:
+                st.subheader(f"🏆 {secilen_ders} Dersinde Gelişim Raporu")
+                ilk = sinav_siralamasi_listesi[0]
+                son = sinav_siralamasi_listesi[-1]
+                st.info(f"Karşılaştırma: **{ilk}** ile **{son}** arası.")
+                
+                df_ilk = df_filt[df_filt['SinavAdi'] == ilk]
+                df_son = df_filt[df_filt['SinavAdi'] == son]
+                
+                if not df_ilk.empty and not df_son.empty:
+                    merged = pd.merge(
+                        df_ilk[['Merge_Key', 'Sınıf', 'DogruSayisi']], 
+                        df_son[['Merge_Key', 'Ad, Soyad', 'DogruSayisi']], 
+                        on='Merge_Key', 
+                        suffixes=('_ilk', '_son')
+                    )
+                    merged['Fark'] = merged['DogruSayisi_son'] - merged['DogruSayisi_ilk']
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.success(f"Neti En Çok Yükselenler ({ilk} -> {son})")
+                        st.dataframe(merged[merged['Fark'] > 0].sort_values('Fark', ascending=False).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']])
+                    with c2:
+                        st.error(f"Neti En Çok Düşenler ({ilk} -> {son})")
+                        st.dataframe(merged[merged['Fark'] < 0].sort_values('Fark', ascending=True).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']])
+
+            # BİREYSEL KARNE (TEKLİ)
+            st.markdown("---")
+            st.subheader("👤 Bireysel Öğrenci Karnesi (Tekli)")
+            
+            unique_students = all_data[['Merge_Key', 'Ad, Soyad', 'Öğr.No']].drop_duplicates(subset=['Merge_Key'], keep='last')
+            unique_students['Etiket'] = unique_students.apply(lambda x: f"{x['Ad, Soyad']} (No: {int(x['Öğr.No'])})" if x['Öğr.No'] > 0 else f"{x['Ad, Soyad']} (No Yok)", axis=1)
+            
+            ogrenci_etiketleri = sorted(unique_students['Etiket'].tolist())
+            secilen_etiket = st.selectbox("Öğrenci Seçin", ogrenci_etiketleri)
+            
+            if secilen_etiket:
+                secilen_key = unique_students[unique_students['Etiket'] == secilen_etiket]['Merge_Key'].iloc[0]
+                ogr_data = all_data[all_data['Merge_Key'] == secilen_key].copy()
+                
+                if not ogr_data.empty:
+                    try:
+                        pvt = ogr_data.pivot_table(index='Ders', columns='SinavAdi', values='DogruSayisi')
+                        mevcut_ve_sirali = [d for d in dersler_sirali if d in pvt.index]
+                        pvt = pvt.reindex(mevcut_ve_sirali)
+                        st.write(f"**{secilen_etiket}** Doğru Sayıları:")
+                        st.dataframe(pvt)
+                    except:
+                        st.error("Tablo hatası.")
+
+                    st.write("Öğrencinin Ders Bazlı Gelişim Grafiği:")
+                    try:
+                        c_ogr = alt.Chart(ogr_data).mark_bar().encode(
+                            x=alt.X('Ders', title='Dersler', sort=dersler_sirali),
+                            y=alt.Y('DogruSayisi', title='Doğru Sayısı'),
+                            color=alt.Color('SinavAdi', title='Sınav'),
+                            xOffset='SinavAdi',
+                            tooltip=['Ders', 'SinavAdi', 'DogruSayisi']
+                        ).interactive()
+                        st.altair_chart(c_ogr, use_container_width=True)
+                    except: 
+                        st.write("Grafik verisi yok.")
 
     # --- SEKME 2: TOPLU KARNELER ---
     with tab_toplu:
@@ -283,7 +295,9 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
         sinif_ogrencileri = sinif_data[['Merge_Key', 'Ad, Soyad', 'Sube', 'Öğr.No']].drop_duplicates(subset=['Merge_Key'], keep='last')
         sinif_ogrencileri = sinif_ogrencileri.sort_values(['Sube', 'Ad, Soyad'])
         
-        if st.button(f"Listeyi Getir ({len(sinif_ogrencileri)} Öğrenci)"):
+        # Yazdırma modundaysa butona basmaya gerek yok, direkt listele
+        if st.button(f"Listeyi Getir ({len(sinif_ogrencileri)} Öğrenci)") or yazdirma_modu:
+            
             st.divider()
             for index, row in sinif_ogrencileri.iterrows():
                 ogr_key = row['Merge_Key']
@@ -293,17 +307,20 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
                 
                 tek_ogr_data = sinif_data[sinif_data['Merge_Key'] == ogr_key]
                 
+                # SAYFA KESME (Yazdırma için)
+                st.markdown('<div class="page-break">', unsafe_allow_html=True)
+                
                 st.markdown(f"### 👤 {ogr_ad} ({ogr_sube} - No: {ogr_no})")
                 
                 try:
                     pvt_toplu = tek_ogr_data.pivot_table(index='SinavAdi', columns='Ders', values='DogruSayisi')
-                    # Sütunları (Dersleri) sırala
                     mevcut_cols = [c for c in dersler_sirali if c in pvt_toplu.columns]
                     pvt_toplu = pvt_toplu[mevcut_cols]
                     st.dataframe(pvt_toplu, use_container_width=True)
                 except:
                     st.error("Tablo hatası")
                 
+                st.markdown('</div>', unsafe_allow_html=True)
                 st.divider()
 
 # --- 7. ANA UYGULAMA AKIŞI ---
