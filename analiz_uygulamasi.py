@@ -1,17 +1,27 @@
 import streamlit as st
 import pandas as pd
 import io
-import sys
-import altair as alt 
+import altair as alt
 
-# Sayfa ayarları
-st.set_page_config(layout="wide", page_title="Okul Sınav Analiz Raporu")
-st.title("👨‍🏫 Okul Sınav Analiz Sistemi")
-st.write("Lütfen Orbim'den aldığınız .xlsx veya .csv dosyasını yükleyin.")
+# --- 1. SAYFA AYARLARI ---
+st.set_page_config(layout="wide", page_title="Okul Sınav Takip Sistemi")
 
-# --- BAŞLIK LİSTELERİ ---
+# --- 2. CSS STİLLERİ ---
+st.markdown("""
+<style>
+@media print {
+    .stSidebar {display: none;}
+    .stButton {display: none;}
+    .stAlert {display: none;}
+    .block-container {padding-top: 0;}
+}
+</style>
+""", unsafe_allow_html=True)
 
-# 2. Sınıf Başlıkları (24 Sütun)
+st.title("📈 Okul Sınav Takip ve Gelişim Sistemi")
+st.markdown("---")
+
+# --- 3. BAŞLIK LİSTELERİ ---
 basliklar_2_sinif = [
     "Öğr.No", "Ad, Soyad", "Sınıf",
     "TÜRKÇE DOĞRU", "TÜRKÇE YANLIŞ", "TÜRKÇE NET",
@@ -22,7 +32,6 @@ basliklar_2_sinif = [
     "LGS PUAN", "Sınıf derece", "Kurum", "İlçe", "İl", "Genel"
 ]
 
-# 3. Sınıf Başlıkları (27 Sütun)
 basliklar_3_sinif = [
     "Öğr.No", "Ad, Soyad", "Sınıf",
     "TÜRKÇE DOĞRU", "TÜRKÇE YANLIŞ", "TÜRKÇE NET",
@@ -34,7 +43,6 @@ basliklar_3_sinif = [
     "LGS PUAN", "Sınıf derece", "Kurum", "İlçe", "İl", "Genel"
 ]
 
-# 4. Sınıf Başlıkları (30 Sütun)
 basliklar_4_sinif = [
     "Öğr.No", "Ad, Soyad", "Sınıf",
     "TÜRKÇE DOĞRU", "TÜRKÇE YANLIŞ", "TÜRKÇE NET",
@@ -47,17 +55,8 @@ basliklar_4_sinif = [
     "LGS PUAN", "Sınıf derece", "Kurum", "İlçe", "İl", "Genel"
 ]
 
-# --- FONKSİYONLAR ---
-
+# --- 4. TEMİZLİK VE AKILLI KİMLİK OLUŞTURMA ---
 def clean_orbim_file(uploaded_file, kademe):
-    """
-    Yüklenen Orbim dosyasını (XLSX veya CSV) alır, temizler ve 
-    'TEMIZLENMIS_SONUCLAR.xlsx' formatına (Geniş Format) dönüştürür.
-    
-    seek() HATASI İÇİN GÜNCELLENDİ.
-    """
-    
-    # 1. Kademeye göre doğru başlık listesini seç
     if kademe == 2:
         yeni_basliklar = basliklar_2_sinif
     elif kademe == 3:
@@ -65,280 +64,291 @@ def clean_orbim_file(uploaded_file, kademe):
     elif kademe == 4:
         yeni_basliklar = basliklar_4_sinif
     else:
-        st.error("Lütfen geçerli bir kademe seçin (2, 3, 4).")
         return None
 
-    # 2. Yüklenen dosyayı oku (XLSX veya CSV olarak deneme)
-    # GÜNCELLEME: Dosyayı önce byte olarak hafızaya al,
-    # sonra hafızadaki bu dosyayı (BytesIO) okumayı dene.
-    
-    # Dosyayı bir kez oku
-    file_bytes = uploaded_file.getvalue()
-    # Hafızada (in-memory) dosya oluştur
-    file_io = io.BytesIO(file_bytes)
-    
-    df = None
     try:
-        # Önce .xlsx olarak okumayı dene
-        df = pd.read_excel(
-            file_io, # Hafızadaki dosyayı oku
-            header=2,       
-            skiprows=[3, 4] # 4. ve 5. satırları atla
-        )
-        st.info("Excel (.xlsx) dosyası olarak okundu.")
-    except Exception as e_excel:
-        st.warning(f"Excel olarak okunamadı. CSV olarak deneniyor...")
-        try:
-            # Hafızadaki dosyayı başa sar (seek(0))
-            file_io.seek(0) 
-            
-            df = pd.read_csv(
-                file_io, # Hafızadaki dosyayı tekrar oku
-                header=2,
-                skiprows=[3, 4],
-                encoding='windows-1254' # Türkçe karakterler için
-            )
-            st.info("CSV dosyası olarak okundu.")
-        except Exception as e_csv:
-            st.error(f"Dosya ne Excel ne de CSV olarak okunamadı: {e_csv}")
-            st.error("Lütfen Orbim'den aldığınız dosyayı değiştirmeden yüklediğinizden emin olun.")
-            return None
-
-    # 3. Sütun sayısını kontrol et ve başlıkları uygula
-    if len(df.columns) != len(yeni_basliklar):
-        st.error(f"Dosyadaki sütun sayısı ({len(df.columns)}) ile")
-        st.error(f"seçtiğiniz {kademe}. sınıf başlık sayısı ({len(yeni_basliklar)}) eşleşmiyor!")
-        st.error("Yüklediğiniz dosyanın kademesini sol menüden doğru seçtiğinizden emin olun.")
-        return None
-    
-    df.columns = yeni_basliklar
-    
-    # 4. Dosyanın sonundaki gereksiz satırları (Genel Ortalama vb.) temizle
-    df = df[pd.to_numeric(df['Öğr.No'], errors='coerce').notna()]
-    
-    st.success("Orbim dosyası başarıyla temizlendi.")
-    return df # Temizlenmiş (Geniş Format) DataFrame'i döndür
-
-
-def format_data(df):
-    """
-    Temizlenmiş (Geniş Format) DataFrame'i alır ve 
-    analiz için 'Uzun Format'a (Ders, Dogru, Yanlis) dönüştürür.
-    """
-    try:
-        id_vars = ['Öğr.No', 'Ad, Soyad', 'Sınıf']
-        value_vars = [col for col in df.columns if 'DOĞRU' in col or 'YANLIŞ' in col or 'NET' in col]
+        file_bytes = uploaded_file.getvalue()
+        file_io = io.BytesIO(file_bytes)
         
+        try:
+            df = pd.read_excel(file_io, header=2, skiprows=[3, 4])
+        except:
+            file_io.seek(0)
+            df = pd.read_csv(file_io, header=2, skiprows=[3, 4], encoding='windows-1254')
+
+        if len(df.columns) != len(yeni_basliklar):
+            st.error(f"HATA: '{uploaded_file.name}' sütun sayısı hatalı.")
+            return None
+        
+        df.columns = yeni_basliklar
+        
+        # Öğrenci olmayan satırları temizle
+        # Öğr.No sayısal olmalı veya boş olabilir (bazı hatalı satırlarda)
+        df['Öğr.No'] = pd.to_numeric(df['Öğr.No'], errors='coerce').fillna(0).astype(int)
+        
+        # Gerçek veri satırlarını filtrele (İsim veya No boşsa at)
+        df = df.dropna(subset=['Ad, Soyad'])
+        
+        # --- AKILLI KİMLİK OLUŞTURMA (Magic ID) ---
+        # 1. Adı standartlaştır (Büyük harf, boşlukları sil)
+        df['Ad_Standart'] = df['Ad, Soyad'].astype(str).str.strip().str.upper()
+        
+        # 2. Birleştirme Anahtarı (Merge_Key) Oluştur
+        # Kural: Eğer No > 0 ise No kullan, değilse İsim kullan.
+        df['Merge_Key'] = df.apply(
+            lambda row: str(row['Öğr.No']) if row['Öğr.No'] > 0 else row['Ad_Standart'], 
+            axis=1
+        )
+        
+        # Çift kayıtları bu yeni anahtara göre sil
+        df.drop_duplicates(subset=['Merge_Key'], keep='first', inplace=True)
+        
+        return df
+    except Exception as e:
+        st.error(f"Dosya temizlenirken hata: {e}")
+        return None
+
+# --- 5. FORMATLAMA FONKSİYONU ---
+def format_data(df, sinav_adi):
+    try:
+        id_vars = ['Merge_Key', 'Öğr.No', 'Ad, Soyad', 'Sınıf'] # Merge_Key eklendi
+        df.columns = df.columns.str.strip()
+        
+        value_vars = [col for col in df.columns if 'DOĞRU' in col or 'YANLIŞ' in col or 'NET' in col]
+        if not value_vars: return pd.DataFrame()
+
         long_df = pd.melt(df, id_vars=id_vars, value_vars=value_vars, var_name='DersBilgisi', value_name='Deger')
         
         split_data = long_df['DersBilgisi'].str.rsplit(' ', n=1, expand=True)
-        long_df['Ders'] = split_data[0]
-        long_df['Tip'] = split_data[1]
+        long_df['Ders'] = split_data[0].str.strip() 
+        long_df['Tip'] = split_data[1].str.strip()
         
-        long_df = long_df[long_df['Tip'].isin(['DOĞRU', 'YANLIŞ'])]
         long_df['Deger'] = pd.to_numeric(long_df['Deger'], errors='coerce')
-        
+        long_df.dropna(subset=['Ders', 'Tip', 'Deger'], inplace=True)
+
         final_df = long_df.pivot_table(
-            index=['Öğr.No', 'Ad, Soyad', 'Sınıf', 'Ders'],
-            columns='Tip',
+            index=['Merge_Key', 'Öğr.No', 'Ad, Soyad', 'Sınıf', 'Ders'], # Merge_Key indexte
+            columns='Tip', 
             values='Deger'
         ).reset_index()
         
-        final_df.rename(columns={'DOĞRU': 'DogruSayisi', 'YANLIŞ': 'YanlisSayisi'}, inplace=True)
+        if 'DOĞRU' in final_df.columns: final_df.rename(columns={'DOĞRU': 'DogruSayisi'}, inplace=True)
+        if 'YANLIŞ' in final_df.columns: final_df.rename(columns={'YANLIŞ': 'YanlisSayisi'}, inplace=True)
+            
         final_df.columns.name = None
+        final_df = final_df[final_df['Sınıf'].str.contains('-', na=False)]
+        final_df[['Kademe', 'Sube']] = final_df['Sınıf'].str.split('-', expand=True)
         
+        final_df['SinavAdi'] = sinav_adi
         return final_df
     except Exception as e:
-        st.error(f"Veri formatlanırken (genişten uzuna) bir hata oluştu: {e}")
+        st.error(f"Veri formatlanırken hata: {e}")
         return pd.DataFrame()
 
+# --- 6. ANALİZ EKRANI ---
+def main_analysis(all_data, sinav_siralamasi_listesi):
+    st.success(f"✅ Analiz Aktif! Toplam {len(all_data['SinavAdi'].unique())} sınav yüklü.")
+    st.info("💡 **İPUCU:** PDF için **CTRL + P** tuşlarını kullanınız.")
 
-def analyze_data(df):
-    """
-    Analize hazır (Uzun Format) DataFrame'i alır ve raporu gösterir.
-    """
+    # --- DERS SEÇİMİ VE SIRALAMA ---
+    ham_dersler = all_data['Ders'].unique().tolist()
+    temiz_dersler = [d for d in ham_dersler if pd.notna(d) and str(d).strip() != ""]
     
-    # 1. Veri Ön İşleme (Sınıfı Kademe ve Şube'ye ayırma)
-    try:
-        # Sınıf sütununda '2-A' gibi olmayan (örn: '2-XX') verileri temizle
-        df = df[df['Sınıf'].str.contains('-', na=False)]
-        
-        df[['Kademe', 'Sube']] = df['Sınıf'].str.split('-', expand=True)
-        df['Kademe'] = pd.to_numeric(df['Kademe'], errors='coerce')
-        
-        # 'DogruSayisi' veya 'YanlisSayisi' olmayan satırları atla (NaN)
-        df.dropna(subset=['DogruSayisi', 'YanlisSayisi'], inplace=True)
-        
-        df.dropna(subset=['Kademe', 'Sube', 'Ders'], inplace=True)
-        df = df[df['Kademe'].isin([2, 3, 4])]
-        
-        if df.empty:
-            st.error("Veri formatlama sonrası analiz edilecek geçerli veri bulunamadı.")
-            return
-
-    except Exception as e:
-        st.error(f"Veri işlenirken bir hata oluştu: {e}")
-        st.error("Sınıf sütunu '2-A', '3-B' gibi bir formatta olmalı.")
+    normal_dersler = sorted([d for d in temiz_dersler if d.strip().upper() != "TOPLAM"])
+    toplam_ders = [d for d in temiz_dersler if d.strip().upper() == "TOPLAM"]
+    dersler_sirali = normal_dersler + toplam_ders
+    
+    if not dersler_sirali:
+        st.error("Verilerde hiçbir ders bulunamadı.")
         return
 
-    # --- Arayüz: Filtreleme Seçenekleri ---
-    st.sidebar.header("2. Adım: Raporu Filtrele")
-    
-    kademeler = sorted(df['Kademe'].unique().tolist())
-    secilen_kademe_analiz = st.sidebar.selectbox("Analiz Kademesi Seçin", ["Tüm Kademeler"] + kademeler)
-
-    if secilen_kademe_analiz != "Tüm Kademeler":
-        filtered_df = df[df['Kademe'] == secilen_kademe_analiz].copy()
-    else:
-        filtered_df = df.copy()
-
-    dersler = sorted(filtered_df['Ders'].unique().tolist())
-    if not dersler:
-        st.warning("Seçilen kademe için ders bulunamadı.")
-        return
+    # Varsayılan TOPLAM
+    default_index = 0
+    if "TOPLAM" in dersler_sirali:
+        default_index = dersler_sirali.index("TOPLAM")
         
-    secilen_ders = st.sidebar.selectbox("Ders Seçin", ["Tüm Dersler"] + dersler)
-
-    if secilen_ders != "Tüm Dersler":
-        filtered_df = filtered_df[filtered_df['Ders'] == secilen_ders]
-
-    st.header(f"Analiz Sonuçları ({secilen_kademe_analiz} / {secilen_ders})")
+    secilen_ders = st.selectbox("Analiz İçin Ders Seçin", dersler_sirali, index=default_index)
     
-    if filtered_df.empty:
-        st.warning("Bu filtreler için gösterilecek veri bulunamadı.")
-        return
-
-    # --- Analiz Bölümü ---
-    
-    # 2. Öğrenci Bazlı Analiz (İSTEĞİNİZE GÖRE DÜZELTİLDİ)
-    st.subheader("Öğrenci Performansları")
-    
-    max_dogru = filtered_df['DogruSayisi'].max()
-    top_students_df = filtered_df[filtered_df['DogruSayisi'] == max_dogru]
-    
-    max_yanlis = filtered_df['YanlisSayisi'].max()
-    bottom_students_df = filtered_df[filtered_df['YanlisSayisi'] == max_yanlis]
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.success(f"En Yüksek Doğru Sayısı ({max_dogru} Doğru)")
-        st.write("Bu başarıyı gösteren öğrenciler:")
-        st.dataframe(top_students_df[['Ad, Soyad', 'Sınıf', 'Ders', 'DogruSayisi', 'YanlisSayisi']])
-                  
-    with col2:
-        st.error(f"En Yüksek Yanlış Sayısı ({max_yanlis} Yanlış)")
-        st.write("Bu sonucu alan öğrenciler:")
-        st.dataframe(bottom_students_df[['Ad, Soyad', 'Sınıf', 'Ders', 'DogruSayisi', 'YanlisSayisi']])
-
-    st.markdown("---")
-
-    # 3. Sınıf (Şube) Bazlı Analiz
-    st.subheader("Sınıf (Şube) Performansları")
-    
-    try:
-        sinif_performans = filtered_df.groupby(['Kademe', 'Sube', 'Ders'])[['DogruSayisi', 'YanlisSayisi']].mean().reset_index()
-        sinif_performans = sinif_performans.sort_values(by='DogruSayisi', ascending=False)
-    except Exception as e:
-        st.error(f"Sınıf performansı hesaplanamadı: {e}")
-        return
-
-    if sinif_performans.empty:
-        st.warning("Sınıf performansı için yeterli veri yok.")
-        return
-
-    en_basarili_sinif = sinif_performans.loc[sinif_performans['DogruSayisi'].idxmax()]
-    en_yuksek_yanlis_sinif = sinif_performans.loc[sinif_performans['YanlisSayisi'].idxmax()]
-    
-    col3, col4 = st.columns(2)
-    with col3:
-        st.success("En Yüksek Doğru Ortalamalı Sınıf")
-        st.metric(label=f"Sınıf: {en_basarili_sinif['Kademe']}-{en_basarili_sinif['Sube']}",
-                  value=f"{en_basarili_sinif['DogruSayisi']:.2f} Doğru Ort.",
-                  delta=f"Ders: {en_basarili_sinif['Ders']}")
-
-    with col4:
-        st.error("En Yüksek Yanlış Ortalamalı Sınıf")
-        st.metric(label=f"Sınıf: {en_yuksek_yanlis_sinif['Kademe']}-{en_yuksek_yanlis_sinif['Sube']}",
-                  value=f"{en_yuksek_yanlis_sinif['YanlisSayisi']:.2f} Yanlış Ort.",
-                  delta=f"Ders: {en_yuksek_yanlis_sinif['Ders']}")
-    
-    st.subheader("Tüm Sınıfların Ortalama Raporu (Filtrelenmiş)")
-    st.dataframe(sinif_performans)
-    
-    
-    # 4. YENİ BÖLÜM: GRAFİKLER
-    st.subheader("Görsel Raporlar (Grafikler)")
-    
-    if not sinif_performans.empty:
+    df_filt = all_data[all_data['Ders'] == secilen_ders].copy()
         
-        if secilen_ders == "Tüm Dersler":
-            st.write("Derslere Göre Ortalama Doğru Sayıları")
+    if df_filt.empty:
+        st.warning("Seçilen ders için veri yok.")
+        return
+
+    # --- SEKMELER ---
+    tab_genel, tab_toplu = st.tabs(["📊 GENEL ANALİZ", "📑 TÜM ÖĞRENCİ KARNELERİ"])
+
+    # --- SEKME 1: GENEL ANALİZ ---
+    with tab_genel:
+        st.subheader(f"📈 Sınıf Bazlı Gelişim ({secilen_ders})")
+        try:
+            sinif_trend = df_filt.groupby(['Sube', 'SinavAdi'])['DogruSayisi'].mean().reset_index()
+            if not sinif_trend.empty:
+                chart = alt.Chart(sinif_trend).mark_bar().encode(
+                    x=alt.X('Sube', title='Şubeler', sort=None),
+                    y=alt.Y('DogruSayisi', title='Ort. Doğru'),
+                    color=alt.Color('SinavAdi', title='Sınav'),
+                    xOffset='SinavAdi',
+                    tooltip=['Sube', 'SinavAdi', 'DogruSayisi']
+                ).interactive()
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.info("Grafik için veri yetersiz.")
+        except:
+            st.warning("Grafik çizilemedi.")
+
+        st.markdown("---")
+
+        # ÖĞRENCİ GELİŞİM LİSTESİ (MERGE KEY İLE)
+        if len(sinav_siralamasi_listesi) >= 2:
+            st.subheader(f"🏆 {secilen_ders} Dersinde Gelişim Raporu")
+            ilk = sinav_siralamasi_listesi[0]
+            son = sinav_siralamasi_listesi[-1]
+            st.info(f"Karşılaştırma: **{ilk}** ile **{son}** arası.")
             
-            ders_ortalamalari = filtered_df.groupby('Ders')[['DogruSayisi', 'YanlisSayisi']].mean().reset_index()
+            df_ilk = df_filt[df_filt['SinavAdi'] == ilk]
+            df_son = df_filt[df_filt['SinavAdi'] == son]
             
-            chart_dersler = alt.Chart(ders_ortalamalari).mark_bar().encode(
-                x=alt.X('Ders', sort=None, title='Dersler'),
-                y=alt.Y('DogruSayisi', title='Doğru Sayısı Ortalaması'),
-                tooltip=['Ders', 'DogruSayisi']
-            ).interactive()
-            st.altair_chart(chart_dersler, use_container_width=True)
+            if not df_ilk.empty and not df_son.empty:
+                # Merge_Key üzerinden birleştir (İsim veya No hangisi sağlamsa)
+                merged = pd.merge(
+                    df_ilk[['Merge_Key', 'Sınıf', 'DogruSayisi']], 
+                    df_son[['Merge_Key', 'Ad, Soyad', 'DogruSayisi']], # Güncel isim son sınavdan
+                    on='Merge_Key', 
+                    suffixes=('_ilk', '_son')
+                )
+                merged['Fark'] = merged['DogruSayisi_son'] - merged['DogruSayisi_ilk']
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.success(f"Yükselenler ({ilk} -> {son})")
+                    st.dataframe(merged[merged['Fark'] > 0].sort_values('Fark', ascending=False).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']])
+                with c2:
+                    st.error(f"Düşenler ({ilk} -> {son})")
+                    st.dataframe(merged[merged['Fark'] < 0].sort_values('Fark', ascending=True).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']])
+
+        # BİREYSEL KARNE (TEKLİ)
+        st.markdown("---")
+        st.subheader("👤 Bireysel Öğrenci Karnesi (Tekli)")
+        
+        unique_students = all_data[['Merge_Key', 'Ad, Soyad', 'Öğr.No']].drop_duplicates(subset=['Merge_Key'], keep='last')
+        # Etikete No 0 ise sadece isim yaz, değilse No ekle
+        unique_students['Etiket'] = unique_students.apply(lambda x: f"{x['Ad, Soyad']} (No: {int(x['Öğr.No'])})" if x['Öğr.No'] > 0 else f"{x['Ad, Soyad']} (No Yok)", axis=1)
+        
+        ogrenci_etiketleri = sorted(unique_students['Etiket'].tolist())
+        secilen_etiket = st.selectbox("Öğrenci Seçin", ogrenci_etiketleri)
+        
+        if secilen_etiket:
+            secilen_key = unique_students[unique_students['Etiket'] == secilen_etiket]['Merge_Key'].iloc[0]
+            ogr_data = all_data[all_data['Merge_Key'] == secilen_key].copy()
             
+            if not ogr_data.empty:
+                try:
+                    pvt = ogr_data.pivot_table(index='Ders', columns='SinavAdi', values='DogruSayisi')
+                    # Sıralamayı uygula
+                    mevcut_ve_sirali = [d for d in dersler_sirali if d in pvt.index]
+                    pvt = pvt.reindex(mevcut_ve_sirali)
+                    st.write(f"**{secilen_etiket}** Doğru Sayıları:")
+                    st.dataframe(pvt)
+                except:
+                    st.error("Tablo hatası.")
+
+                st.write("Öğrencinin Ders Bazlı Gelişim Grafiği:")
+                try:
+                    c_ogr = alt.Chart(ogr_data).mark_bar().encode(
+                        x=alt.X('Ders', title='Dersler', sort=dersler_sirali),
+                        y=alt.Y('DogruSayisi', title='Doğru Sayısı'),
+                        color=alt.Color('SinavAdi', title='Sınav'),
+                        xOffset='SinavAdi',
+                        tooltip=['Ders', 'SinavAdi', 'DogruSayisi']
+                    ).interactive()
+                    st.altair_chart(c_ogr, use_container_width=True)
+                except: 
+                    st.write("Grafik verisi yok.")
+
+    # --- SEKME 2: TOPLU KARNELER ---
+    with tab_toplu:
+        st.header("📑 Tüm Öğrenci Karneleri")
+        st.info("Sınıf seçin ve tüm öğrencilerin karnelerini listeleyin.")
+        
+        subeler = sorted(all_data['Sube'].unique().tolist())
+        secenekler_sube = ["TÜM OKUL (Bütün Şubeler)"] + subeler
+        secilen_sube_toplu = st.selectbox("Hangi Sınıfı Listelemek İstersiniz?", secenekler_sube)
+        
+        if secilen_sube_toplu == "TÜM OKUL (Bütün Şubeler)":
+            sinif_data = all_data.copy()
         else:
-            st.write(f"'{secilen_ders}' Dersi İçin Şubelerin Ortalama Doğru Sayıları")
-            
-            chart_subeler_dogru = alt.Chart(sinif_performans).mark_bar().encode(
-                x=alt.X('Sube', sort=None, title='Sınıflar (Şubeler)'),
-                y=alt.Y('DogruSayisi', title='Doğru Sayısı Ortalaması'),
-                color='Sube',
-                tooltip=['Sube', 'DogruSayisi']
-            ).interactive()
-            
-            st.altair_chart(chart_subeler_dogru, use_container_width=True)
-            
-            st.write(f"'{secilen_ders}' Dersi İçin Şubelerin Ortalama Yanlış Sayıları")
-            chart_subeler_yanlis = alt.Chart(sinif_performans).mark_bar().encode(
-                x=alt.X('Sube', sort=None, title='Sınıflar (Şubeler)'),
-                y=alt.Y('YanlisSayisi', title='Yanlış Sayısı Ortalaması'),
-                color=alt.Color('Sube', legend=None), 
-                tooltip=['Sube', 'YanlisSayisi']
-            ).interactive()
-            
-            st.altair_chart(chart_subeler_yanlis, use_container_width=True)
-
-# --- ANA UYGULAMA AKIŞI ---
-
-st.sidebar.header("1. Adım: Veri Yükleme")
-
-secilen_kademe_temizleme = st.sidebar.selectbox(
-    "Yüklenecek dosyanın kademesini seçin:",
-    (None, 2, 3, 4),
-    index=0,
-    placeholder="Kademe seçin..."
-)
-
-uploaded_file = st.sidebar.file_uploader(
-    "Orbim (.xlsx veya .csv) dosyasını buraya sürükleyin:",
-    type=["xlsx", "csv"]
-)
-
-if uploaded_file is not None and secilen_kademe_temizleme is not None:
-    st.sidebar.success(f"Dosya '{uploaded_file.name}' yüklendi!")
-    
-    # 1. Dosyayı Temizle (Geniş Format)
-    df_wide = clean_orbim_file(uploaded_file, secilen_kademe_temizleme)
-    
-    if df_wide is not None:
-        # 2. Veriyi Analiz Formatına (Uzun) Dönüştür
-        df_long = format_data(df_wide)
+            sinif_data = all_data[all_data['Sube'] == secilen_sube_toplu].copy()
         
-        if df_long is not None and not df_long.empty:
-            st.success("Veri başarıyla formatlandı. Rapor Hazır:")
-            # 3. Analizi Başlat ve Raporu Göster
-            analyze_data(df_long)
-        else:
-            st.error("Veri formatlanırken bir sorun oluştu.")
+        sinif_ogrencileri = sinif_data[['Merge_Key', 'Ad, Soyad', 'Sube', 'Öğr.No']].drop_duplicates(subset=['Merge_Key'], keep='last')
+        sinif_ogrencileri = sinif_ogrencileri.sort_values(['Sube', 'Ad, Soyad'])
+        
+        if st.button(f"Listeyi Getir ({len(sinif_ogrencileri)} Öğrenci)"):
+            st.divider()
+            for index, row in sinif_ogrencileri.iterrows():
+                ogr_key = row['Merge_Key']
+                ogr_ad = row['Ad, Soyad']
+                ogr_sube = row['Sube']
+                ogr_no = int(row['Öğr.No']) if row['Öğr.No'] > 0 else "Yok"
+                
+                tek_ogr_data = sinif_data[sinif_data['Merge_Key'] == ogr_key]
+                
+                st.markdown(f"### 👤 {ogr_ad} ({ogr_sube} - No: {ogr_no})")
+                
+                try:
+                    pvt_toplu = tek_ogr_data.pivot_table(index='SinavAdi', columns='Ders', values='DogruSayisi')
+                    # Sütunları (Dersleri) sırala
+                    mevcut_cols = [c for c in dersler_sirali if c in pvt_toplu.columns]
+                    pvt_toplu = pvt_toplu[mevcut_cols]
+                    st.dataframe(pvt_toplu, use_container_width=True)
+                except:
+                    st.error("Tablo hatası")
+                
+                st.divider()
 
-elif uploaded_file is None:
-    st.info("Lütfen sol menüden kademe seçip bir Orbim dosyası yükleyin.")
-elif secilen_kademe_temizleme is None:
-    st.info("Lütfen sol menüden yüklenecek dosyanın kademesini (2, 3, 4) seçin.")
+# --- 7. ANA UYGULAMA AKIŞI ---
+
+if 'master_df' not in st.session_state:
+    st.session_state.master_df = None
+if 'sinav_listesi' not in st.session_state:
+    st.session_state.sinav_listesi = []
+
+st.sidebar.header("Veri Yükleme")
+kademe = st.sidebar.selectbox("Kademe", [None, 2, 3, 4])
+files = st.sidebar.file_uploader("Dosyaları Yükleyin", accept_multiple_files=True)
+
+if kademe and files:
+    st.sidebar.markdown("---")
+    st.sidebar.write("Sınav Sıralaması:")
+    
+    dosya_bilgileri = []
+    secenekler = [f"{i}. Sınav" for i in range(1, len(files)+1)]
+    
+    for i, f in enumerate(files):
+        idx = i if i < len(secenekler) else 0
+        sira = st.sidebar.selectbox(f"{f.name}", secenekler, key=f.name, index=idx)
+        dosya_bilgileri.append({"file": f, "sinav_adi": sira})
+        
+    if st.sidebar.button("ANALİZİ BAŞLAT 🚀", type="primary"):
+        dosya_bilgileri.sort(key=lambda x: x["sinav_adi"])
+        
+        dfs = []
+        for item in dosya_bilgileri:
+            clean_df = clean_orbim_file(item["file"], kademe)
+            if clean_df is not None:
+                fmt_df = format_data(clean_df, item["sinav_adi"])
+                if not fmt_df.empty:
+                    dfs.append(fmt_df)
+        
+        if dfs:
+            st.session_state.master_df = pd.concat(dfs, ignore_index=True)
+            st.session_state.sinav_listesi = [x["sinav_adi"] for x in dosya_bilgileri]
+            st.success("Veriler işlendi!")
+        else:
+            st.error("Dosyalar işlenemedi.")
+
+if st.session_state.master_df is not None:
+    main_analysis(st.session_state.master_df, st.session_state.sinav_listesi)
+
+elif not kademe:
+    st.info("Lütfen soldan Kademe seçin.")
