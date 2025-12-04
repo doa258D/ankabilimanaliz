@@ -6,56 +6,10 @@ import altair as alt
 # --- 1. SAYFA AYARLARI ---
 st.set_page_config(layout="wide", page_title="Okul Sınav Takip Sistemi")
 
-# --- 2. CSS STİLLERİ (GÜÇLENDİRİLMİŞ YAZDIRMA AYARI) ---
-st.markdown("""
-<style>
-@media print {
-    /* 1. Tüm sayfa yapısını serbest bırak */
-    html, body, [class*="View"], [class*="App"] {
-        height: auto !important;
-        width: 100% !important;
-        overflow: visible !important;
-        position: static !important;
-    }
-
-    /* 2. Yan menü, üst bilgi, alt bilgi ve butonları gizle */
-    .stSidebar, header, footer, .stButton, .stSelectbox, .stTabs [role="tablist"], .stAlert, [data-testid="stHeader"], [data-testid="stToolbar"] {
-        display: none !important;
-    }
-    
-    /* 3. İçerik konteynerini genişlet */
-    .block-container {
-        padding: 0 !important;
-        margin: 0 !important;
-        overflow: visible !important;
-        height: auto !important;
-        max-width: 100% !important;
-    }
-
-    /* 4. Tabloların ve Grafiklerin kesilmesini önle */
-    .element-container, .stDataFrame, .stTable {
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-        width: 100% !important;
-        display: block !important;
-    }
-    
-    /* 5. Her öğrenci bloğundan sonra sayfa kes */
-    .student-block { 
-        page-break-after: always;
-        display: block;
-        margin-top: 20px;
-        border-bottom: 1px solid #ddd; /* Ayırıcı çizgi */
-        padding-bottom: 20px;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-
 st.title("📈 Okul Sınav Takip ve Gelişim Sistemi")
 st.markdown("---")
 
-# --- 3. BAŞLIK LİSTELERİ ---
+# --- 2. BAŞLIK LİSTELERİ ---
 basliklar_2_sinif = [
     "Öğr.No", "Ad, Soyad", "Sınıf",
     "TÜRKÇE DOĞRU", "TÜRKÇE YANLIŞ", "TÜRKÇE NET",
@@ -89,7 +43,7 @@ basliklar_4_sinif = [
     "LGS PUAN", "Sınıf derece", "Kurum", "İlçe", "İl", "Genel"
 ]
 
-# --- 4. TEMİZLİK VE AKILLI KİMLİK OLUŞTURMA ---
+# --- 3. TEMİZLİK VE AKILLI KİMLİK OLUŞTURMA ---
 def clean_orbim_file(uploaded_file, kademe):
     if kademe == 2:
         yeni_basliklar = basliklar_2_sinif
@@ -116,22 +70,30 @@ def clean_orbim_file(uploaded_file, kademe):
         
         df.columns = yeni_basliklar
         
+        # 1. Numara Temizliği: Boşları 0 yap
         df['Öğr.No'] = pd.to_numeric(df['Öğr.No'], errors='coerce').fillna(0).astype(int)
+        
+        # 2. İsim Temizliği: Boş isimli satırları at
         df = df.dropna(subset=['Ad, Soyad'])
         
+        # 3. AKILLI KİMLİK (Magic ID)
+        # İsmi standartlaştır (BÜYÜK HARF, boşluksuz)
         df['Ad_Standart'] = df['Ad, Soyad'].astype(str).str.strip().str.upper()
+        
+        # KURAL: Eğer No > 0 ise No kullan, yoksa İsmi kullan
         df['Merge_Key'] = df.apply(
             lambda row: str(row['Öğr.No']) if row['Öğr.No'] > 0 else row['Ad_Standart'], 
             axis=1
         )
         
+        # Çift kayıtları sil
         df.drop_duplicates(subset=['Merge_Key'], keep='first', inplace=True)
         return df
     except Exception as e:
         st.error(f"Dosya temizlenirken hata: {e}")
         return None
 
-# --- 5. FORMATLAMA FONKSİYONU ---
+# --- 4. FORMATLAMA FONKSİYONU ---
 def format_data(df, sinav_adi):
     try:
         id_vars = ['Merge_Key', 'Öğr.No', 'Ad, Soyad', 'Sınıf']
@@ -168,22 +130,9 @@ def format_data(df, sinav_adi):
         st.error(f"Veri formatlanırken hata: {e}")
         return pd.DataFrame()
 
-# --- 6. ANALİZ EKRANI ---
+# --- 5. ANALİZ EKRANI ---
 def main_analysis(all_data, sinav_siralamasi_listesi):
     st.success(f"✅ Analiz Aktif! Toplam {len(all_data['SinavAdi'].unique())} sınav yüklü.")
-
-    # --- YAZDIRMA MODU KUTUCUĞU ---
-    # Bu kutu seçilince sayfa tamamen sadeleşir
-    yazdirma_modu = st.sidebar.checkbox("🖨️ YAZDIRMA MODUNU AÇ (PDF Almak İçin)")
-    
-    if yazdirma_modu:
-        st.warning("⚠️ **Yazdırma Modu Açık:** Sayfa PDF için optimize edildi. Şimdi **CTRL + P** tuşlarına basarak yazdırabilirsiniz.")
-        # Bu CSS sadece kutu seçiliyken eklenir ve her şeyi gizler
-        st.markdown("""
-        <style>
-            .stTabs [role="tablist"], .stSelectbox, .stMarkdown h1, .stMarkdown h2, [data-testid="stSidebar"] {display: none !important;}
-        </style>
-        """, unsafe_allow_html=True)
 
     # --- DERS SEÇİMİ VE SIRALAMA ---
     ham_dersler = all_data['Ders'].unique().tolist()
@@ -232,6 +181,7 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
 
             st.markdown("---")
 
+            # ÖĞRENCİ GELİŞİM LİSTESİ
             if len(sinav_siralamasi_listesi) >= 2:
                 st.subheader(f"🏆 {secilen_ders} Dersinde Gelişim Raporu")
                 ilk = sinav_siralamasi_listesi[0]
@@ -253,11 +203,18 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
                     c1, c2 = st.columns(2)
                     with c1:
                         st.success(f"Neti En Çok Yükselenler ({ilk} -> {son})")
-                        st.dataframe(merged[merged['Fark'] > 0].sort_values('Fark', ascending=False).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']], hide_index=True)
+                        st.dataframe(
+                            merged[merged['Fark'] > 0].sort_values('Fark', ascending=False).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']],
+                            hide_index=True
+                        )
                     with c2:
                         st.error(f"Neti En Çok Düşenler ({ilk} -> {son})")
-                        st.dataframe(merged[merged['Fark'] < 0].sort_values('Fark', ascending=True).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']], hide_index=True)
+                        st.dataframe(
+                            merged[merged['Fark'] < 0].sort_values('Fark', ascending=True).head(10)[['Ad, Soyad','Sınıf','DogruSayisi_ilk','DogruSayisi_son','Fark']],
+                            hide_index=True
+                        )
 
+            # BİREYSEL KARNE (TEKLİ)
             st.markdown("---")
             st.subheader("👤 Bireysel Öğrenci Karnesi (Tekli)")
             
@@ -277,7 +234,7 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
                         mevcut_ve_sirali = [d for d in dersler_sirali if d in pvt.index]
                         pvt = pvt.reindex(mevcut_ve_sirali)
                         st.write(f"**{secilen_etiket}** Doğru Sayıları:")
-                        st.dataframe(pvt) # Bireysel karne dataframe olarak kalsın, sorun yok
+                        st.dataframe(pvt)
                     except:
                         st.error("Tablo hatası.")
 
@@ -297,7 +254,7 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
     # --- SEKME 2: TOPLU KARNELER ---
     with tab_toplu:
         st.header("📑 Tüm Öğrenci Karneleri")
-        st.info("Sınıf seçin, 'Listeyi Getir'e basın. PDF almak için sol menüden **'Yazdırma Modunu Aç'**ı işaretleyin ve **CTRL+P** yapın.")
+        st.info("İncelemek istediğiniz sınıfı seçin ve 'Listeyi Getir' butonuna basın.")
         
         subeler = sorted(all_data['Sube'].unique().tolist())
         secenekler_sube = ["TÜM OKUL (Bütün Şubeler)"] + subeler
@@ -311,8 +268,7 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
         sinif_ogrencileri = sinif_data[['Merge_Key', 'Ad, Soyad', 'Sube', 'Öğr.No']].drop_duplicates(subset=['Merge_Key'], keep='last')
         sinif_ogrencileri = sinif_ogrencileri.sort_values(['Sube', 'Ad, Soyad'])
         
-        # Yazdırma modundaysa buton olmadan direkt listele
-        if st.button(f"Listeyi Getir ({len(sinif_ogrencileri)} Öğrenci)") or yazdirma_modu:
+        if st.button(f"Listeyi Getir ({len(sinif_ogrencileri)} Öğrenci)"):
             
             st.divider()
             for index, row in sinif_ogrencileri.iterrows():
@@ -322,9 +278,6 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
                 ogr_no = int(row['Öğr.No']) if row['Öğr.No'] > 0 else "Yok"
                 
                 tek_ogr_data = sinif_data[sinif_data['Merge_Key'] == ogr_key]
-                
-                # SAYFA KESME VE BLOKLAMA
-                st.markdown('<div class="student-block">', unsafe_allow_html=True)
                 
                 st.markdown(f"### 👤 {ogr_ad} ({ogr_sube} - No: {ogr_no})")
                 
@@ -336,9 +289,8 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
                         mevcut_cols = [c for c in dersler_sirali if c in pvt_toplu.columns]
                         pvt_toplu = pvt_toplu[mevcut_cols]
                         
-                        # YAZDIRMA İÇİN KRİTİK: st.table kullanıyoruz!
-                        # st.dataframe yazdırırken kaydırma çubuğu çıkarır, st.table ise tüm satırları basar.
-                        st.table(pvt_toplu)
+                        # EKRAN GÖRÜNTÜLEME MODU (Dataframe daha şık durur)
+                        st.dataframe(pvt_toplu, use_container_width=True)
                     except:
                         st.error("Tablo hatası")
                 
@@ -354,8 +306,7 @@ def main_analysis(all_data, sinav_siralamasi_listesi):
                     except:
                         pass
                 
-                st.markdown('</div>', unsafe_allow_html=True)
-                st.markdown("---") 
+                st.divider()
 
 # --- 7. ANA UYGULAMA AKIŞI ---
 
